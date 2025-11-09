@@ -333,10 +333,10 @@ contract RepoRewardsTest is Test {
         yieldSource1 = new MockERC4626Vault(address(token1));
         yieldSource2 = new MockERC4626Vault(address(token2));
 
-        // Deploy RepoRewards with yieldSource1 as the default
+        // Deploy RepoRewards
         // Note: RepoRewards will deploy YieldDonatingTokenizedStrategy internally
+        // Each organization will specify its own yield source during registration
         repoRewards = new RepoRewards(
-            address(yieldSource1),
             keeper,
             emergencyAdmin,
             false // enableBurning
@@ -352,7 +352,7 @@ contract RepoRewardsTest is Test {
 
     function test_RegisterOrganization() public {
         (uint256 orgId, address strategy) = repoRewards.registerOrganization(
-            address(token1),
+            address(yieldSource1),
             management1,
             "Test Organization 1"
         );
@@ -365,14 +365,31 @@ contract RepoRewardsTest is Test {
             orgId
         );
         assertEq(org.strategy, strategy, "Strategy should match");
-        assertEq(org.token, address(token1), "Token should match");
+        assertEq(
+            org.yieldSource,
+            address(yieldSource1),
+            "Yield source should match"
+        );
+        assertEq(
+            org.token,
+            address(token1),
+            "Token should match (derived from vault)"
+        );
         assertEq(org.management, management1, "Management should match");
         assertEq(org.totalPrincipal, 0, "Initial principal should be 0");
     }
 
     function test_RegisterMultipleOrganizations() public {
-        repoRewards.registerOrganization(address(token1), management1, "Org 1");
-        repoRewards.registerOrganization(address(token2), management2, "Org 2");
+        repoRewards.registerOrganization(
+            address(yieldSource1),
+            management1,
+            "Org 1"
+        );
+        repoRewards.registerOrganization(
+            address(yieldSource2),
+            management2,
+            "Org 2"
+        );
 
         assertEq(repoRewards.nextOrgId(), 2, "Should have 2 organizations");
         assertEq(repoRewards.getOrganizationCount(), 2, "Count should be 2");
@@ -384,20 +401,28 @@ contract RepoRewardsTest is Test {
         assertEq(org2.token, address(token2), "Org 2 token should match");
     }
 
-    function test_RegisterOrganization_RevertIf_InvalidToken() public {
-        vm.expectRevert("Invalid token");
+    function test_RegisterOrganization_RevertIf_InvalidYieldSource() public {
+        vm.expectRevert("Invalid yield source");
         repoRewards.registerOrganization(address(0), management1, "Test");
     }
 
     function test_RegisterOrganization_RevertIf_InvalidManagement() public {
         vm.expectRevert("Invalid management");
-        repoRewards.registerOrganization(address(token1), address(0), "Test");
+        repoRewards.registerOrganization(
+            address(yieldSource1),
+            address(0),
+            "Test"
+        );
     }
 
     function test_RegisterOrganization_OnlyOwner() public {
         vm.prank(makeAddr("notOwner"));
         vm.expectRevert();
-        repoRewards.registerOrganization(address(token1), management1, "Test");
+        repoRewards.registerOrganization(
+            address(yieldSource1),
+            management1,
+            "Test"
+        );
     }
 
     /*//////////////////////////////////////////////////////////////
@@ -405,7 +430,10 @@ contract RepoRewardsTest is Test {
     //////////////////////////////////////////////////////////////*/
 
     function test_AddPrincipal() public {
-        uint256 orgId = _registerOrganization(address(token1), management1);
+        uint256 orgId = _registerOrganization(
+            address(yieldSource1),
+            management1
+        );
         uint256 amount = 1000e18;
 
         token1.mint(address(this), amount);
@@ -423,7 +451,10 @@ contract RepoRewardsTest is Test {
     }
 
     function test_AddPrincipal_MultipleTimes() public {
-        uint256 orgId = _registerOrganization(address(token1), management1);
+        uint256 orgId = _registerOrganization(
+            address(yieldSource1),
+            management1
+        );
         uint256 amount1 = 1000e18;
         uint256 amount2 = 500e18;
 
@@ -452,14 +483,20 @@ contract RepoRewardsTest is Test {
     }
 
     function test_AddPrincipal_RevertIf_ZeroAmount() public {
-        uint256 orgId = _registerOrganization(address(token1), management1);
+        uint256 orgId = _registerOrganization(
+            address(yieldSource1),
+            management1
+        );
 
         vm.expectRevert("Amount must be greater than 0");
         repoRewards.addPrincipal(orgId, 0);
     }
 
     function test_ReducePrincipal() public {
-        uint256 orgId = _registerOrganization(address(token1), management1);
+        uint256 orgId = _registerOrganization(
+            address(yieldSource1),
+            management1
+        );
         uint256 depositAmount = 1000e18;
         uint256 withdrawAmount = 500e18;
 
@@ -489,7 +526,10 @@ contract RepoRewardsTest is Test {
     }
 
     function test_ReducePrincipal_OnlyManagementOrOwner() public {
-        uint256 orgId = _registerOrganization(address(token1), management1);
+        uint256 orgId = _registerOrganization(
+            address(yieldSource1),
+            management1
+        );
         uint256 amount = 1000e18;
 
         token1.mint(address(this), amount);
@@ -502,7 +542,10 @@ contract RepoRewardsTest is Test {
     }
 
     function test_ReducePrincipal_RevertIf_InsufficientPrincipal() public {
-        uint256 orgId = _registerOrganization(address(token1), management1);
+        uint256 orgId = _registerOrganization(
+            address(yieldSource1),
+            management1
+        );
         uint256 depositAmount = 1000e18;
 
         token1.mint(address(this), depositAmount);
@@ -519,7 +562,10 @@ contract RepoRewardsTest is Test {
     //////////////////////////////////////////////////////////////*/
 
     function test_Harvest() public {
-        uint256 orgId = _registerOrganization(address(token1), management1);
+        uint256 orgId = _registerOrganization(
+            address(yieldSource1),
+            management1
+        );
         uint256 depositAmount = 1000e18;
 
         // Setup: deposit principal
@@ -547,7 +593,10 @@ contract RepoRewardsTest is Test {
     }
 
     function test_AllocateRewards() public {
-        uint256 orgId = _registerOrganization(address(token1), management1);
+        uint256 orgId = _registerOrganization(
+            address(yieldSource1),
+            management1
+        );
         uint256 depositAmount = 1000e18;
         uint256 yieldAmount = 100e18;
 
@@ -585,7 +634,10 @@ contract RepoRewardsTest is Test {
     }
 
     function test_AllocateRewards_OnlyManagementOrOwner() public {
-        uint256 orgId = _registerOrganization(address(token1), management1);
+        uint256 orgId = _registerOrganization(
+            address(yieldSource1),
+            management1
+        );
 
         address[] memory contributors = new address[](1);
         contributors[0] = contributor1;
@@ -598,7 +650,10 @@ contract RepoRewardsTest is Test {
     }
 
     function test_AllocateRewards_RevertIf_InsufficientRewards() public {
-        uint256 orgId = _registerOrganization(address(token1), management1);
+        uint256 orgId = _registerOrganization(
+            address(yieldSource1),
+            management1
+        );
 
         address[] memory contributors = new address[](1);
         contributors[0] = contributor1;
@@ -611,7 +666,10 @@ contract RepoRewardsTest is Test {
     }
 
     function test_Claim() public {
-        uint256 orgId = _registerOrganization(address(token1), management1);
+        uint256 orgId = _registerOrganization(
+            address(yieldSource1),
+            management1
+        );
         uint256 depositAmount = 1000e18;
         uint256 yieldAmount = 100e18;
         uint256 rewardShares = 50e18;
@@ -657,7 +715,10 @@ contract RepoRewardsTest is Test {
     }
 
     function test_Claim_RevertIf_NoRewards() public {
-        uint256 orgId = _registerOrganization(address(token1), management1);
+        uint256 orgId = _registerOrganization(
+            address(yieldSource1),
+            management1
+        );
 
         vm.prank(contributor1);
         vm.expectRevert("No rewards to claim");
@@ -669,7 +730,10 @@ contract RepoRewardsTest is Test {
     //////////////////////////////////////////////////////////////*/
 
     function test_GetOrganization() public {
-        uint256 orgId = _registerOrganization(address(token1), management1);
+        uint256 orgId = _registerOrganization(
+            address(yieldSource1),
+            management1
+        );
 
         RepoRewards.Organization memory org = repoRewards.getOrganization(
             orgId
@@ -679,7 +743,10 @@ contract RepoRewardsTest is Test {
     }
 
     function test_GetContributorReward() public {
-        uint256 orgId = _registerOrganization(address(token1), management1);
+        uint256 orgId = _registerOrganization(
+            address(yieldSource1),
+            management1
+        );
         uint256 depositAmount = 1000e18;
         uint256 yieldAmount = 100e18;
         uint256 rewardShares = 100e18;
@@ -716,10 +783,10 @@ contract RepoRewardsTest is Test {
             "Initial count should be 0"
         );
 
-        _registerOrganization(address(token1), management1);
+        _registerOrganization(address(yieldSource1), management1);
         assertEq(repoRewards.getOrganizationCount(), 1, "Count should be 1");
 
-        _registerOrganization(address(token2), management2);
+        _registerOrganization(address(yieldSource2), management2);
         assertEq(repoRewards.getOrganizationCount(), 2, "Count should be 2");
     }
 
@@ -728,11 +795,11 @@ contract RepoRewardsTest is Test {
     //////////////////////////////////////////////////////////////*/
 
     function _registerOrganization(
-        address token,
+        address yieldSource,
         address management
     ) internal returns (uint256 orgId) {
         (orgId, ) = repoRewards.registerOrganization(
-            token,
+            yieldSource,
             management,
             "Test Org"
         );

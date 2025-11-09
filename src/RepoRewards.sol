@@ -12,6 +12,7 @@ import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {
     SafeERC20
 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import {IERC4626} from "@openzeppelin/contracts/interfaces/IERC4626.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 
 /**
@@ -30,12 +31,14 @@ contract RepoRewards is Ownable {
     /**
      * @notice Organization data structure
      * @param strategy Address of the organization's YieldDonatingStrategy
-     * @param token Address of the organization's reward token
+     * @param yieldSource Address of the organization's yield source (ERC4626 vault)
+     * @param token Address of the organization's reward token (derived from yieldSource)
      * @param management Address with management permissions for the strategy
      * @param totalPrincipal Total principal amount deposited by the organization
      */
     struct Organization {
         address strategy;
+        address yieldSource;
         address token;
         address management;
         uint256 totalPrincipal;
@@ -44,9 +47,6 @@ contract RepoRewards is Ownable {
     /*//////////////////////////////////////////////////////////////
                                  STATE
     //////////////////////////////////////////////////////////////*/
-
-    /// @notice Shared yield source address (Yearn vault)
-    address public immutable yieldSource;
 
     /// @notice Keeper address for strategies
     address public immutable keeper;
@@ -120,22 +120,18 @@ contract RepoRewards is Ownable {
     //////////////////////////////////////////////////////////////*/
 
     /**
-     * @param _yieldSource Address of the shared yield source (Yearn vault)
      * @param _keeper Keeper address for strategies
      * @param _emergencyAdmin Emergency admin address for strategies
      * @param _enableBurning Whether burning is enabled for strategies
      */
     constructor(
-        address _yieldSource,
         address _keeper,
         address _emergencyAdmin,
         bool _enableBurning
     ) Ownable(msg.sender) {
-        require(_yieldSource != address(0), "Invalid yield source");
         require(_keeper != address(0), "Invalid keeper");
         require(_emergencyAdmin != address(0), "Invalid emergency admin");
 
-        yieldSource = _yieldSource;
         keeper = _keeper;
         emergencyAdmin = _emergencyAdmin;
         enableBurning = _enableBurning;
@@ -152,19 +148,24 @@ contract RepoRewards is Ownable {
 
     /**
      * @notice Register a new organization
-     * @param _token Address of the organization's reward token
+     * @param _yieldSource Address of the organization's yield source (ERC4626 vault)
      * @param _management Address with management permissions for the strategy
      * @param _name Name for the strategy
      * @return orgId The assigned organization ID
      * @return strategy Address of the deployed YieldDonatingStrategy
      */
     function registerOrganization(
-        address _token,
+        address _yieldSource,
         address _management,
         string memory _name
     ) external onlyOwner returns (uint256 orgId, address strategy) {
-        require(_token != address(0), "Invalid token");
+        require(_yieldSource != address(0), "Invalid yield source");
         require(_management != address(0), "Invalid management");
+
+        // Get the underlying token from the ERC4626 vault
+        IERC4626 vault = IERC4626(_yieldSource);
+        address _token = vault.asset();
+        require(_token != address(0), "Invalid vault asset");
 
         // Assign the next available organization ID
         orgId = nextOrgId;
@@ -174,7 +175,7 @@ contract RepoRewards is Ownable {
         // Set this contract as keeper so it can call report() on behalf of users
         strategy = address(
             new YieldDonatingStrategy(
-                yieldSource,
+                _yieldSource,
                 _token,
                 _name,
                 _management,
@@ -188,6 +189,7 @@ contract RepoRewards is Ownable {
 
         organizations[orgId] = Organization({
             strategy: strategy,
+            yieldSource: _yieldSource,
             token: _token,
             management: _management,
             totalPrincipal: 0

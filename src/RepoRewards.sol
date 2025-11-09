@@ -180,7 +180,7 @@ contract RepoRewards is Ownable {
                 _management,
                 address(this), // keeper = this contract (can call report)
                 emergencyAdmin,
-                address(this), // donationAddress = this contract
+                address(this), // donationAddress = this contract - will do a payment splitter contract if i get time
                 enableBurning,
                 tokenizedStrategyAddress
             )

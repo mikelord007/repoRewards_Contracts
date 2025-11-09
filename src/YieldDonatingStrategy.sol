@@ -6,9 +6,10 @@ import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {
     SafeERC20
 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import {IERC4626} from "@openzeppelin/contracts/interfaces/IERC4626.sol";
 
-// todo implement IYieldSource interface
-interface IYieldSource {}
+// Yearn vaults are ERC4626 compliant
+interface IYieldSource is IERC4626 {}
 
 /**
  * @title YieldDonating Strategy Template
@@ -85,11 +86,9 @@ contract YieldDonatingStrategy is BaseStrategy {
      * to deploy.
      */
     function _deployFunds(uint256 _amount) internal override {
-        // TODO: implement your logic to deploy funds into yield source
-        // Example for AAVE:
-        // yieldSource.supply(address(asset), _amount, address(this), 0);
-        // Example for ERC4626 vault:
-        // IERC4626(compounderVault).deposit(_amount, address(this));
+        // Deposit assets into Yearn vault (ERC4626)
+        // The vault will mint shares to this strategy
+        IERC4626(address(yieldSource)).deposit(_amount, address(this));
     }
 
     /**
@@ -114,12 +113,13 @@ contract YieldDonatingStrategy is BaseStrategy {
      * @param _amount, The amount of 'asset' to be freed.
      */
     function _freeFunds(uint256 _amount) internal override {
-        // TODO: implement your logic to free funds from yield source
-        // Example for AAVE:
-        // yieldSource.withdraw(address(asset), _amount, address(this));
-        // Example for ERC4626 vault:
-        // uint256 shares = IERC4626(compounderVault).convertToShares(_amount);
-        // IERC4626(compounderVault).redeem(shares, address(this), address(this));
+        // Withdraw assets from Yearn vault (ERC4626)
+        // withdraw() takes asset amount and returns shares burned
+        IERC4626(address(yieldSource)).withdraw(
+            _amount,
+            address(this),
+            address(this)
+        );
     }
 
     /**
@@ -149,10 +149,24 @@ contract YieldDonatingStrategy is BaseStrategy {
         override
         returns (uint256 _totalAssets)
     {
-        // TODO: Implement harvesting logic
-        // 1. Amount of assets claimable from the yield source
-        // 2. Amount of assets idle in the strategy
-        // 3. Return the total (assets claimable + assets idle)
+        // For Yearn vaults, assets are automatically accruing yield
+        // We just need to account for:
+        // 1. Assets in the vault (convert vault shares to assets)
+        // 2. Assets idle in this strategy
+
+        IERC4626 vault = IERC4626(address(yieldSource));
+
+        // Get vault shares held by this strategy
+        uint256 vaultShares = vault.balanceOf(address(this));
+
+        // Convert vault shares to assets
+        uint256 assetsInVault = vault.convertToAssets(vaultShares);
+
+        // Get idle assets in this strategy
+        uint256 idleAssets = asset.balanceOf(address(this));
+
+        // Total assets = assets in vault + idle assets
+        _totalAssets = assetsInVault + idleAssets;
     }
 
     /*//////////////////////////////////////////////////////////////

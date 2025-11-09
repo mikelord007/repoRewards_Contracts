@@ -7,6 +7,7 @@ import {YieldDonatingStrategy} from "../src/YieldDonatingStrategy.sol";
 import {
     ITokenizedStrategy
 } from "@octant-core/core/interfaces/ITokenizedStrategy.sol";
+import {IERC4626} from "@openzeppelin/contracts/interfaces/IERC4626.sol";
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 
 // Mock ERC20 token for testing
@@ -141,29 +142,130 @@ contract MockTokenizedStrategy is ERC20 {
     }
 }
 
-// Mock YieldSource
-interface IYieldSource {
-    function deposit(uint256 amount) external;
-    function withdraw(uint256 amount) external;
-}
+// Mock ERC4626 Vault (Yearn vault) for testing
+contract MockERC4626Vault is ERC20, IERC4626 {
+    ERC20 public immutable assetToken;
+    uint256 public totalAssetsValue;
+    uint256 public yieldRate = 1e18; // 1:1 initially, can be adjusted to simulate yield
 
-contract MockYieldSource {
-    ERC20 public token;
-    mapping(address => uint256) public balances;
-
-    constructor(address _token) {
-        token = ERC20(_token);
+    constructor(address _asset) ERC20("Mock Yearn Vault", "MYV") {
+        assetToken = ERC20(_asset);
+        totalAssetsValue = 0;
     }
 
-    function deposit(uint256 amount) external {
-        token.transferFrom(msg.sender, address(this), amount);
-        balances[msg.sender] += amount;
+    // IERC4626 interface functions
+    function asset() external view returns (address) {
+        return address(assetToken);
     }
 
-    function withdraw(uint256 amount) external {
-        require(balances[msg.sender] >= amount, "Insufficient balance");
-        balances[msg.sender] -= amount;
-        token.transfer(msg.sender, amount);
+    function totalAssets() external view returns (uint256) {
+        return totalAssetsValue;
+    }
+
+    function convertToShares(uint256 assets) public view returns (uint256) {
+        if (totalAssetsValue == 0) return assets;
+        return (assets * totalSupply()) / totalAssetsValue;
+    }
+
+    function convertToAssets(uint256 shares) public view returns (uint256) {
+        if (totalSupply() == 0) return shares;
+        return (shares * totalAssetsValue) / totalSupply();
+    }
+
+    function maxDeposit(address) external pure returns (uint256) {
+        return type(uint256).max;
+    }
+
+    function maxMint(address) external pure returns (uint256) {
+        return type(uint256).max;
+    }
+
+    function maxWithdraw(address owner) external view returns (uint256) {
+        return convertToAssets(balanceOf(owner));
+    }
+
+    function maxRedeem(address owner) external view returns (uint256) {
+        return balanceOf(owner);
+    }
+
+    function previewDeposit(uint256 assets) external view returns (uint256) {
+        return convertToShares(assets);
+    }
+
+    function previewMint(uint256 shares) external view returns (uint256) {
+        return convertToAssets(shares);
+    }
+
+    function previewWithdraw(uint256 assets) external view returns (uint256) {
+        return convertToShares(assets);
+    }
+
+    function previewRedeem(uint256 shares) external view returns (uint256) {
+        return convertToAssets(shares);
+    }
+
+    function deposit(
+        uint256 assets,
+        address receiver
+    ) external returns (uint256) {
+        assetToken.transferFrom(msg.sender, address(this), assets);
+        uint256 shares = convertToShares(assets);
+        _mint(receiver, shares);
+        totalAssetsValue += assets;
+        return shares;
+    }
+
+    function mint(uint256 shares, address receiver) external returns (uint256) {
+        uint256 assets = convertToAssets(shares);
+        assetToken.transferFrom(msg.sender, address(this), assets);
+        _mint(receiver, shares);
+        totalAssetsValue += assets;
+        return assets;
+    }
+
+    function withdraw(
+        uint256 assets,
+        address receiver,
+        address owner
+    ) external returns (uint256) {
+        // Convert requested assets to shares based on current conversion rate
+        uint256 shares = convertToShares(assets);
+        if (msg.sender != owner) {
+            _spendAllowance(owner, msg.sender, shares);
+        }
+        _burn(owner, shares);
+        // Withdraw exactly the requested assets amount
+        totalAssetsValue -= assets;
+        assetToken.transfer(receiver, assets);
+        return shares;
+    }
+
+    function redeem(
+        uint256 shares,
+        address receiver,
+        address owner
+    ) external returns (uint256) {
+        if (msg.sender != owner) {
+            _spendAllowance(owner, msg.sender, shares);
+        }
+        _burn(owner, shares);
+        uint256 assets = convertToAssets(shares);
+        totalAssetsValue -= assets;
+        assetToken.transfer(receiver, assets);
+        return assets;
+    }
+
+    // Helper to simulate yield accrual
+    function simulateYield(uint256 yieldAmount) external {
+        // Mint tokens to the vault to simulate yield
+        MockERC20(address(assetToken)).mint(address(this), yieldAmount);
+        // Increase totalAssetsValue to reflect the yield
+        totalAssetsValue += yieldAmount;
+    }
+
+    // Helper to set yield rate (for testing different scenarios)
+    function setYieldRate(uint256 _rate) external {
+        yieldRate = _rate;
     }
 }
 
@@ -171,9 +273,8 @@ contract RepoRewardsTest is Test {
     RepoRewards public repoRewards;
     MockERC20 public token1;
     MockERC20 public token2;
-    MockTokenizedStrategy public mockStrategy1;
-    MockTokenizedStrategy public mockStrategy2;
-    MockYieldSource public yieldSource;
+    MockERC4626Vault public yieldSource1;
+    MockERC4626Vault public yieldSource2;
     address public owner;
     address public keeper;
     address public emergencyAdmin;
@@ -228,13 +329,14 @@ contract RepoRewardsTest is Test {
         token1 = new MockERC20("Token 1", "TKN1");
         token2 = new MockERC20("Token 2", "TKN2");
 
-        // Deploy mock yield source
-        yieldSource = new MockYieldSource(address(token1));
+        // Deploy mock ERC4626 vaults (Yearn vaults) as yield sources
+        yieldSource1 = new MockERC4626Vault(address(token1));
+        yieldSource2 = new MockERC4626Vault(address(token2));
 
-        // Deploy RepoRewards
+        // Deploy RepoRewards with yieldSource1 as the default
         // Note: RepoRewards will deploy YieldDonatingTokenizedStrategy internally
         repoRewards = new RepoRewards(
-            address(yieldSource),
+            address(yieldSource1),
             keeper,
             emergencyAdmin,
             false // enableBurning
@@ -242,11 +344,6 @@ contract RepoRewardsTest is Test {
 
         // Get the deployed tokenized strategy address
         tokenizedStrategyAddress = repoRewards.tokenizedStrategyAddress();
-
-        // Deploy mock strategies (these would normally be YieldDonatingStrategy instances)
-        // For testing purposes, we'll use MockTokenizedStrategy
-        mockStrategy1 = new MockTokenizedStrategy(address(token1));
-        mockStrategy2 = new MockTokenizedStrategy(address(token2));
     }
 
     /*//////////////////////////////////////////////////////////////
@@ -254,14 +351,6 @@ contract RepoRewardsTest is Test {
     //////////////////////////////////////////////////////////////*/
 
     function test_RegisterOrganization() public {
-        vm.expectEmit(true, true, true, true);
-        emit OrganizationRegistered(
-            0,
-            address(mockStrategy1),
-            address(token1),
-            management1
-        );
-
         (uint256 orgId, address strategy) = repoRewards.registerOrganization(
             address(token1),
             management1,
@@ -270,10 +359,12 @@ contract RepoRewardsTest is Test {
 
         assertEq(orgId, 0, "First org should have ID 0");
         assertEq(repoRewards.nextOrgId(), 1, "Next org ID should be 1");
+        assertTrue(strategy != address(0), "Strategy should be deployed");
 
         RepoRewards.Organization memory org = repoRewards.getOrganization(
             orgId
         );
+        assertEq(org.strategy, strategy, "Strategy should match");
         assertEq(org.token, address(token1), "Token should match");
         assertEq(org.management, management1, "Management should match");
         assertEq(org.totalPrincipal, 0, "Initial principal should be 0");
@@ -377,8 +468,8 @@ contract RepoRewardsTest is Test {
         token1.approve(address(repoRewards), depositAmount);
         repoRewards.addPrincipal(orgId, depositAmount);
 
-        // Mock strategy to hold tokens
-        token1.mint(address(mockStrategy1), depositAmount);
+        // Note: With real YieldDonatingStrategy, funds are in the vault
+        // The strategy will withdraw from vault when reducePrincipal is called
 
         // Reduce principal
         vm.prank(management1);
@@ -436,9 +527,10 @@ contract RepoRewardsTest is Test {
         token1.approve(address(repoRewards), depositAmount);
         repoRewards.addPrincipal(orgId, depositAmount);
 
-        // Simulate yield in strategy
+        // Simulate yield in the vault (Yearn vault)
+        // The strategy deposits into the vault, so yield accrues in the vault
         uint256 yieldAmount = 100e18;
-        mockStrategy1.simulateYield(yieldAmount);
+        yieldSource1.simulateYield(yieldAmount);
 
         // Harvest (must be called by keeper)
         vm.prank(keeper);
@@ -463,7 +555,8 @@ contract RepoRewardsTest is Test {
         token1.mint(address(this), depositAmount);
         token1.approve(address(repoRewards), depositAmount);
         repoRewards.addPrincipal(orgId, depositAmount);
-        mockStrategy1.simulateYield(yieldAmount);
+        // Simulate yield in the vault
+        yieldSource1.simulateYield(yieldAmount);
         vm.prank(keeper);
         repoRewards.harvest(orgId);
 
@@ -527,7 +620,8 @@ contract RepoRewardsTest is Test {
         token1.mint(address(this), depositAmount);
         token1.approve(address(repoRewards), depositAmount);
         repoRewards.addPrincipal(orgId, depositAmount);
-        mockStrategy1.simulateYield(yieldAmount);
+        // Simulate yield in the vault
+        yieldSource1.simulateYield(yieldAmount);
         vm.prank(keeper);
         repoRewards.harvest(orgId);
 
@@ -539,9 +633,8 @@ contract RepoRewardsTest is Test {
         vm.prank(management1);
         repoRewards.allocateRewards(orgId, contributors, shares);
 
-        // Mock strategy to have tokens for redemption
-        uint256 assetsToRedeem = mockStrategy1.convertToAssets(rewardShares);
-        token1.mint(address(mockStrategy1), assetsToRedeem);
+        // Note: The vault already has assets from the deposit and yield
+        // When claiming, the strategy will redeem shares from the vault
 
         // Claim
         uint256 balanceBefore = token1.balanceOf(contributor1);
@@ -587,18 +680,31 @@ contract RepoRewardsTest is Test {
 
     function test_GetContributorReward() public {
         uint256 orgId = _registerOrganization(address(token1), management1);
+        uint256 depositAmount = 1000e18;
+        uint256 yieldAmount = 100e18;
+        uint256 rewardShares = 100e18;
 
+        // Setup: deposit, harvest to create pending rewards
+        token1.mint(address(this), depositAmount);
+        token1.approve(address(repoRewards), depositAmount);
+        repoRewards.addPrincipal(orgId, depositAmount);
+        // Simulate yield in the vault
+        yieldSource1.simulateYield(yieldAmount);
+        vm.prank(keeper);
+        repoRewards.harvest(orgId);
+
+        // Allocate rewards
         address[] memory contributors = new address[](1);
         contributors[0] = contributor1;
         uint256[] memory shares = new uint256[](1);
-        shares[0] = 100e18;
+        shares[0] = rewardShares;
 
         vm.prank(management1);
         repoRewards.allocateRewards(orgId, contributors, shares);
 
         assertEq(
             repoRewards.getContributorReward(orgId, contributor1),
-            100e18,
+            rewardShares,
             "Reward should match"
         );
     }

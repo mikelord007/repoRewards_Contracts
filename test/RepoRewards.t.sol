@@ -4,7 +4,9 @@ pragma solidity ^0.8.23;
 import {Test, console} from "forge-std/Test.sol";
 import {RepoRewards} from "../src/RepoRewards.sol";
 import {YieldDonatingStrategy} from "../src/YieldDonatingStrategy.sol";
-import {ITokenizedStrategy} from "@octant-core/core/interfaces/ITokenizedStrategy.sol";
+import {
+    ITokenizedStrategy
+} from "@octant-core/core/interfaces/ITokenizedStrategy.sol";
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 
 // Mock ERC20 token for testing
@@ -50,7 +52,10 @@ contract MockTokenizedStrategy is ERC20 {
         donationAddress = _donationAddress;
     }
 
-    function deposit(uint256 assets, address receiver) external returns (uint256) {
+    function deposit(
+        uint256 assets,
+        address receiver
+    ) external returns (uint256) {
         asset.transferFrom(msg.sender, address(this), assets);
         uint256 shares = convertToShares(assets);
         _mint(receiver, shares);
@@ -129,8 +134,10 @@ contract MockTokenizedStrategy is ERC20 {
     }
 
     // Helper to simulate yield
+    // Note: This function expects the asset to be a MockERC20 with a mint function
     function simulateYield(uint256 yieldAmount) external {
-        asset.mint(address(this), yieldAmount);
+        // Use address(asset) to get the address, then cast to MockERC20
+        MockERC20(address(asset)).mint(address(this), yieldAmount);
     }
 }
 
@@ -182,9 +189,21 @@ contract RepoRewardsTest is Test {
         address indexed token,
         address management
     );
-    event PrincipalAdded(uint256 indexed orgId, address indexed token, uint256 amount);
-    event PrincipalReduced(uint256 indexed orgId, address indexed token, uint256 amount);
-    event RewardsHarvested(uint256 indexed orgId, uint256 profit, uint256 totalRewards);
+    event PrincipalAdded(
+        uint256 indexed orgId,
+        address indexed token,
+        uint256 amount
+    );
+    event PrincipalReduced(
+        uint256 indexed orgId,
+        address indexed token,
+        uint256 amount
+    );
+    event RewardsHarvested(
+        uint256 indexed orgId,
+        uint256 profit,
+        uint256 totalRewards
+    );
     event ContributorRewardAllocated(
         uint256 indexed orgId,
         address indexed contributor,
@@ -236,7 +255,12 @@ contract RepoRewardsTest is Test {
 
     function test_RegisterOrganization() public {
         vm.expectEmit(true, true, true, true);
-        emit OrganizationRegistered(0, address(mockStrategy1), address(token1), management1);
+        emit OrganizationRegistered(
+            0,
+            address(mockStrategy1),
+            address(token1),
+            management1
+        );
 
         (uint256 orgId, address strategy) = repoRewards.registerOrganization(
             address(token1),
@@ -247,7 +271,9 @@ contract RepoRewardsTest is Test {
         assertEq(orgId, 0, "First org should have ID 0");
         assertEq(repoRewards.nextOrgId(), 1, "Next org ID should be 1");
 
-        RepoRewards.Organization memory org = repoRewards.getOrganization(orgId);
+        RepoRewards.Organization memory org = repoRewards.getOrganization(
+            orgId
+        );
         assertEq(org.token, address(token1), "Token should match");
         assertEq(org.management, management1, "Management should match");
         assertEq(org.totalPrincipal, 0, "Initial principal should be 0");
@@ -299,7 +325,9 @@ contract RepoRewardsTest is Test {
 
         repoRewards.addPrincipal(orgId, amount);
 
-        RepoRewards.Organization memory org = repoRewards.getOrganization(orgId);
+        RepoRewards.Organization memory org = repoRewards.getOrganization(
+            orgId
+        );
         assertEq(org.totalPrincipal, amount, "Principal should be updated");
     }
 
@@ -314,8 +342,14 @@ contract RepoRewardsTest is Test {
         repoRewards.addPrincipal(orgId, amount1);
         repoRewards.addPrincipal(orgId, amount2);
 
-        RepoRewards.Organization memory org = repoRewards.getOrganization(orgId);
-        assertEq(org.totalPrincipal, amount1 + amount2, "Principal should accumulate");
+        RepoRewards.Organization memory org = repoRewards.getOrganization(
+            orgId
+        );
+        assertEq(
+            org.totalPrincipal,
+            amount1 + amount2,
+            "Principal should accumulate"
+        );
     }
 
     function test_AddPrincipal_RevertIf_OrgNotFound() public {
@@ -353,8 +387,14 @@ contract RepoRewardsTest is Test {
 
         repoRewards.reducePrincipal(orgId, withdrawAmount);
 
-        RepoRewards.Organization memory org = repoRewards.getOrganization(orgId);
-        assertEq(org.totalPrincipal, depositAmount - withdrawAmount, "Principal should be reduced");
+        RepoRewards.Organization memory org = repoRewards.getOrganization(
+            orgId
+        );
+        assertEq(
+            org.totalPrincipal,
+            depositAmount - withdrawAmount,
+            "Principal should be reduced"
+        );
     }
 
     function test_ReducePrincipal_OnlyManagementOrOwner() public {
@@ -400,7 +440,8 @@ contract RepoRewardsTest is Test {
         uint256 yieldAmount = 100e18;
         mockStrategy1.simulateYield(yieldAmount);
 
-        // Harvest
+        // Harvest (must be called by keeper)
+        vm.prank(keeper);
         (uint256 profit, uint256 loss) = repoRewards.harvest(orgId);
 
         assertEq(profit, yieldAmount, "Profit should match yield");
@@ -409,6 +450,7 @@ contract RepoRewardsTest is Test {
 
     function test_Harvest_RevertIf_OrgNotFound() public {
         vm.expectRevert("Organization not found");
+        vm.prank(keeper);
         repoRewards.harvest(999);
     }
 
@@ -422,6 +464,7 @@ contract RepoRewardsTest is Test {
         token1.approve(address(repoRewards), depositAmount);
         repoRewards.addPrincipal(orgId, depositAmount);
         mockStrategy1.simulateYield(yieldAmount);
+        vm.prank(keeper);
         repoRewards.harvest(orgId);
 
         // Allocate rewards
@@ -485,6 +528,7 @@ contract RepoRewardsTest is Test {
         token1.approve(address(repoRewards), depositAmount);
         repoRewards.addPrincipal(orgId, depositAmount);
         mockStrategy1.simulateYield(yieldAmount);
+        vm.prank(keeper);
         repoRewards.harvest(orgId);
 
         address[] memory contributors = new address[](1);
@@ -534,7 +578,9 @@ contract RepoRewardsTest is Test {
     function test_GetOrganization() public {
         uint256 orgId = _registerOrganization(address(token1), management1);
 
-        RepoRewards.Organization memory org = repoRewards.getOrganization(orgId);
+        RepoRewards.Organization memory org = repoRewards.getOrganization(
+            orgId
+        );
         assertEq(org.token, address(token1), "Token should match");
         assertEq(org.management, management1, "Management should match");
     }
@@ -558,7 +604,11 @@ contract RepoRewardsTest is Test {
     }
 
     function test_GetOrganizationCount() public {
-        assertEq(repoRewards.getOrganizationCount(), 0, "Initial count should be 0");
+        assertEq(
+            repoRewards.getOrganizationCount(),
+            0,
+            "Initial count should be 0"
+        );
 
         _registerOrganization(address(token1), management1);
         assertEq(repoRewards.getOrganizationCount(), 1, "Count should be 1");
@@ -575,7 +625,10 @@ contract RepoRewardsTest is Test {
         address token,
         address management
     ) internal returns (uint256 orgId) {
-        (orgId, ) = repoRewards.registerOrganization(token, management, "Test Org");
+        (orgId, ) = repoRewards.registerOrganization(
+            token,
+            management,
+            "Test Org"
+        );
     }
 }
-

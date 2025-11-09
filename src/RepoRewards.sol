@@ -171,13 +171,14 @@ contract RepoRewards is Ownable {
         nextOrgId++;
 
         // Deploy new YieldDonatingStrategy for this organization
+        // Set this contract as keeper so it can call report() on behalf of users
         strategy = address(
             new YieldDonatingStrategy(
                 yieldSource,
                 _token,
                 _name,
                 _management,
-                keeper,
+                address(this), // keeper = this contract (can call report)
                 emergencyAdmin,
                 address(this), // donationAddress = this contract
                 enableBurning,
@@ -215,7 +216,8 @@ contract RepoRewards is Ownable {
         token.safeTransferFrom(msg.sender, address(this), _amount);
 
         // Approve strategy to spend tokens
-        token.safeApprove(org.strategy, _amount);
+        // Note: forceApprove is used instead of safeApprove (removed in OpenZeppelin v5)
+        token.forceApprove(org.strategy, _amount);
 
         // Deposit into strategy
         ITokenizedStrategy(org.strategy).deposit(_amount, address(this));

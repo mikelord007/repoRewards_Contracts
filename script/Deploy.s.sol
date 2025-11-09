@@ -11,7 +11,6 @@ contract DeployScript is Script {
         address keeper = vm.envAddress("KEEPER");
         address emergencyAdmin = vm.envAddress("EMERGENCY_ADMIN");
         bool enableBurning = vm.envBool("ENABLE_BURNING");
-        address tokenizedStrategyAddress = vm.envAddress("TOKENIZED_STRATEGY_ADDRESS");
 
         vm.startBroadcast(deployerPrivateKey);
 
@@ -19,8 +18,7 @@ contract DeployScript is Script {
             yieldSource,
             keeper,
             emergencyAdmin,
-            enableBurning,
-            tokenizedStrategyAddress
+            enableBurning
         );
 
         console.log("RepoRewards deployed at:", address(repoRewards));
@@ -28,7 +26,7 @@ contract DeployScript is Script {
         console.log("Keeper:", keeper);
         console.log("Emergency Admin:", emergencyAdmin);
         console.log("Enable Burning:", enableBurning);
-        console.log("Tokenized Strategy Address:", tokenizedStrategyAddress);
+        console.log("Tokenized Strategy Address:", repoRewards.tokenizedStrategyAddress());
         console.log("Owner:", msg.sender);
         console.log("Note: Each organization will specify its own reward token during registration");
 

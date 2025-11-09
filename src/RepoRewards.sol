@@ -5,6 +5,9 @@ import {YieldDonatingStrategy} from "./YieldDonatingStrategy.sol";
 import {
     ITokenizedStrategy
 } from "@octant-core/core/interfaces/ITokenizedStrategy.sol";
+import {
+    YieldDonatingTokenizedStrategy
+} from "@octant-core/strategies/yieldDonating/YieldDonatingTokenizedStrategy.sol";
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {
     SafeERC20
@@ -121,28 +124,26 @@ contract RepoRewards is Ownable {
      * @param _keeper Keeper address for strategies
      * @param _emergencyAdmin Emergency admin address for strategies
      * @param _enableBurning Whether burning is enabled for strategies
-     * @param _tokenizedStrategyAddress TokenizedStrategy implementation address
      */
     constructor(
         address _yieldSource,
         address _keeper,
         address _emergencyAdmin,
-        bool _enableBurning,
-        address _tokenizedStrategyAddress
+        bool _enableBurning
     ) Ownable(msg.sender) {
         require(_yieldSource != address(0), "Invalid yield source");
         require(_keeper != address(0), "Invalid keeper");
         require(_emergencyAdmin != address(0), "Invalid emergency admin");
-        require(
-            _tokenizedStrategyAddress != address(0),
-            "Invalid tokenized strategy"
-        );
 
         yieldSource = _yieldSource;
         keeper = _keeper;
         emergencyAdmin = _emergencyAdmin;
         enableBurning = _enableBurning;
-        tokenizedStrategyAddress = _tokenizedStrategyAddress;
+
+        // Deploy YieldDonatingTokenizedStrategy implementation
+        tokenizedStrategyAddress = address(
+            new YieldDonatingTokenizedStrategy()
+        );
     }
 
     /*//////////////////////////////////////////////////////////////

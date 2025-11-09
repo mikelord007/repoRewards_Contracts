@@ -212,19 +212,17 @@ contract RepoRewardsTest is Test {
         // Deploy mock yield source
         yieldSource = new MockYieldSource(address(token1));
 
-        // Deploy mock tokenized strategy implementation
-        // In real scenario, this would be the actual TokenizedStrategy contract
-        // For testing, we'll use a mock
-        tokenizedStrategyAddress = address(new MockTokenizedStrategy(address(token1)));
-
         // Deploy RepoRewards
+        // Note: RepoRewards will deploy YieldDonatingTokenizedStrategy internally
         repoRewards = new RepoRewards(
             address(yieldSource),
             keeper,
             emergencyAdmin,
-            false, // enableBurning
-            tokenizedStrategyAddress
+            false // enableBurning
         );
+
+        // Get the deployed tokenized strategy address
+        tokenizedStrategyAddress = repoRewards.tokenizedStrategyAddress();
 
         // Deploy mock strategies (these would normally be YieldDonatingStrategy instances)
         // For testing purposes, we'll use MockTokenizedStrategy

@@ -2,7 +2,7 @@
 src = "src"
 out = "out"
 libs = ["lib"]
-solc_version = "0.8.23"
+solc_version = "0.8.25"
 optimizer = true
 optimizer_runs = 200
 via_ir = true
@@ -10,3 +10,6 @@ via_ir = true
 [profile.ci]
 fuzz = { runs = 10000 }
 
+[dependencies]
+"@openzeppelin-contracts" = { version = "5.3.0", git = "https://github.com/OpenZeppelin/openzeppelin-contracts", tag = "v5.3.0" }
+"@octant-core" = { version = "0.1.0", git = "https://github.com/golemfoundation/octant-v2-core", tag = "v0.1.0" }

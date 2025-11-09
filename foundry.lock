@@ -1,0 +1,11 @@
+{
+  "lib/octant-v2-core": {
+    "rev": "8fcc0183bd92b0f898417e81ad385ab0a834c22f"
+  },
+  "lib\\openzeppelin-contracts": {
+    "tag": {
+      "name": "v5.5.0",
+      "rev": "fcbae5394ae8ad52d8e580a3477db99814b9d565"
+    }
+  }
+}
